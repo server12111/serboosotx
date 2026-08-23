@@ -4,8 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from aiogram import Bot
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.base import StorageKey
-from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.fsm.storage.base import BaseStorage, StorageKey
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..config import config
@@ -79,7 +78,7 @@ async def try_credit_paid_invoice(
 
 
 async def _process_once(
-    session_factory: async_sessionmaker[AsyncSession], cryptobot_token: str, bot: Bot, storage: RedisStorage
+    session_factory: async_sessionmaker[AsyncSession], cryptobot_token: str, bot: Bot, storage: BaseStorage
 ) -> None:
     async with session_factory() as session:
         active = await InvoiceRepository.list_active(session)
@@ -129,7 +128,7 @@ async def notify_referral_bonus(bot: Bot, tg_id: int, bonus: Decimal) -> None:
         logger.debug("could not notify referrer %s about bonus", tg_id)
 
 
-async def offer_resume_order(bot: Bot, storage: RedisStorage, tg_id: int, new_balance: Decimal) -> None:
+async def offer_resume_order(bot: Bot, storage: BaseStorage, tg_id: int, new_balance: Decimal) -> None:
     """Most top-ups triggered from an "insufficient funds" screen are actually picked
     up here (this background sweep), not via the manual "Проверить оплату" button — so
     the same resume-the-pending-order offer implemented for the manual-check path in
@@ -163,7 +162,7 @@ async def loop(
     session_factory: async_sessionmaker[AsyncSession],
     cryptobot_token: str,
     bot: Bot,
-    storage: RedisStorage,
+    storage: BaseStorage,
     interval_sec: int,
 ) -> None:
     while True:

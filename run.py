@@ -7,7 +7,7 @@ import time
 from bot.config import config
 from bot.utils.logger import setup_logging
 
-LOCK_FILE = os.path.join(config.LOGS_PATH, "..", "boosty.lock")
+LOCK_FILE = os.path.join(config.DATA_DIR, "boosty.lock")
 
 logger = logging.getLogger("boosty.run")
 

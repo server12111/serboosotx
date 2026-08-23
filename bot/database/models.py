@@ -13,10 +13,17 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    func,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+def _utcnow() -> datetime.datetime:
+    """Python-side default instead of server_default=func.now() — SQLite's
+    CURRENT_TIMESTAMP produces a naive string with no offset, which reads back as a
+    naive datetime and can't be compared against the timezone-aware UTC datetimes the
+    rest of the app uses. A single consistent source of truth avoids that mismatch."""
+    return datetime.datetime.now(datetime.timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -26,7 +33,13 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -34,7 +47,7 @@ class User(Base):
     is_banned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     referrer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     last_seen_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -49,7 +62,13 @@ class User(Base):
 class Service(Base):
     __tablename__ = "services"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     external_service_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     category_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -64,13 +83,13 @@ class Service(Base):
     dripfeed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     first_seen_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     last_seen_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
     __table_args__ = (
@@ -82,7 +101,13 @@ class Service(Base):
 class Order(Base):
     __tablename__ = "orders"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     service_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("services.id"), nullable=False)
     external_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -97,10 +122,10 @@ class Order(Base):
     remains: Mapped[int | None] = mapped_column(Integer, nullable=True)
     upstream_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
     last_checked_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -111,7 +136,7 @@ class Order(Base):
         Index(
             "ix_orders_open",
             "last_checked_at",
-            postgresql_where=text(
+            sqlite_where=text(
                 "status NOT IN ('completed','canceled','failed','refunded')"
             ),
         ),
@@ -121,7 +146,13 @@ class Order(Base):
 class BalanceTransaction(Base):
     __tablename__ = "balance_transactions"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     type: Mapped[str] = mapped_column(String(24), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
@@ -134,7 +165,7 @@ class BalanceTransaction(Base):
     )
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
 
     __table_args__ = (Index("ix_balance_tx_user_created", "user_id", "created_at"),)
@@ -143,7 +174,13 @@ class BalanceTransaction(Base):
 class CryptoBotInvoice(Base):
     __tablename__ = "cryptobot_invoices"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     cryptobot_invoice_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     asset: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -152,7 +189,7 @@ class CryptoBotInvoice(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     pay_url: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     paid_at: Mapped[datetime.datetime | None] = mapped_column(
@@ -168,7 +205,7 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
     updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
@@ -176,13 +213,19 @@ class Setting(Base):
 class AdminAction(Base):
     __tablename__ = "admin_actions"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     target_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
 
 
@@ -194,12 +237,18 @@ class RequiredChannel(Base):
 
     __tablename__ = "required_channels"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Integer, not BigInteger: SQLite's autoincrement rowid-alias only kicks in for a
+    # column declared exactly "INTEGER PRIMARY KEY" — BigInteger compiles to "BIGINT"
+    # DDL, which SQLite does NOT special-case, so it'd require an explicit id on every
+    # insert instead of auto-generating one. SQLite's INTEGER-affinity storage is
+    # already a full 64-bit signed range regardless of the declared width, so nothing
+    # is lost — this is SQLAlchemy's documented recommendation for SQLite PKs.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     added_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )

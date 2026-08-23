@@ -11,15 +11,30 @@ TikTok, YouTube и ещё ~14 платформ) поверх API `icheatbot.com/
 
 ## Запуск
 
-- Локально (нужны Postgres + Redis): `python run.py`
+- Локально (никаких внешних сервисов не нужно — только SQLite-файлы): `python run.py`
 - Docker: `docker compose up -d` (сам применяет миграции перед стартом)
 - Миграции вручную: `alembic upgrade head`
 
 ## Стек
 
 aiogram 3.20+ (цветные кнопки и `icon_custom_emoji_id` требуют именно этой версии,
-Bot API 9.4), SQLAlchemy 2.0 async + asyncpg + Alembic, Redis (FSM-хранилище + локи +
-анти-флуд), aiohttp для внешних API.
+Bot API 9.4), SQLAlchemy 2.0 async + aiosqlite + Alembic, aiohttp для внешних API.
+
+**Redis нет и не нужен** — бот работает как единственный процесс (это уже гарантирует
+файловый лок в `run.py`), поэтому FSM-состояние живёт в собственном SQLite-файле
+(`bot/services/sqlite_fsm_storage.py::SQLiteStorage`, отдельном от основной БД — FSM
+пишется почти на каждый тап пользователя и не должен конкурировать за лок с
+денежными операциями), а локи от двойного тапа и антифлуд — простые in-process
+словари (`bot/handlers/order.py`, `bot/middlewares/throttling.py`,
+`bot/middlewares/subscription_gate.py`). Если когда-нибудь понадобится несколько
+процессов бота одновременно — все три места придётся вернуть на что-то внешнее.
+
+SQLite настроен на WAL + `busy_timeout=10000` + `foreign_keys=ON`
+(`bot/database/engine.py`) — конкурентные читатели не блокируются, а писатель ждёт и
+повторяет попытку вместо мгновенной ошибки "database is locked". PK-колонки `id`
+везде объявлены как `Integer`, не `BigInteger` — SQLite даёт автоинкремент только
+колонке, буквально объявленной `INTEGER PRIMARY KEY` (см. комментарий в
+`bot/database/models.py`).
 
 ## Ключевые решения
 
@@ -40,8 +55,11 @@ Bot API 9.4), SQLAlchemy 2.0 async + asyncpg + Alembic, Redis (FSM-хранил�
 `bot/utils/emoji.py::pe()` оборачивает известные глифы в `<tg-emoji>` для
 `parse_mode=HTML`. Отправка кастомных эмодзи в тексте требует Telegram Premium на
 аккаунте, создавшем бота в BotFather (Bot API 9.4) — без Premium теги просто не
-рендерятся, ошибки не будет. Требует ли того же `icon_custom_emoji_id` на кнопках —
-**проверить эмпирически при первом реальном запуске и дополнить этот пункт фактом**.
+рендерятся, ошибки не будет. **Подтверждено на реальном запуске**: `icon_custom_emoji_id`
+на кнопках требует того же самого (Premium на аккаунте-владельце бота) и работает —
+но `_btn()`/`_split_leading_icon()` в `bot/keyboards/inline.py` подхватывают эмодзи
+только если оно стоит **первым** в тексте кнопки; в конце строки останется обычным
+юникодом без иконки (см. историю правок вокруг кнопки "Далее").
 
 Новые платформенные эмодзи нельзя выдумывать — id нужно собрать с реального клиента.
 Используйте `/emojiid` (админ-хендлер `bot/handlers/admin/tools.py`): перешлите боту

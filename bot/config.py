@@ -52,10 +52,17 @@ class Config:
 
     CRYPTOBOT_TOKEN: str = os.getenv("CRYPTOBOT_TOKEN", "")
 
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "postgresql+asyncpg://boosty:boosty@localhost:5432/boosty"
-    )
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # Where persistent local state lives — the main SQLite DB, the FSM-state SQLite
+    # DB, logs, and the single-instance lock file all sit under here. Set DATA_DIR to
+    # the host's persistent volume path in production (e.g. /app/data).
+    DATA_DIR: str = os.getenv("DATA_DIR", "data")
+
+    # Built with a literal "/" (not os.path.join) — URLs always use forward slashes
+    # regardless of OS, unlike FSM_DB_PATH below which is a plain filesystem path.
+    DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{DATA_DIR}/boosty.db")
+    # Separate file from the main DB — FSM writes (one per user keystroke/tap) would
+    # otherwise compete for the same single-writer lock as order/balance writes.
+    FSM_DB_PATH: str = os.getenv("FSM_DB_PATH", os.path.join(DATA_DIR, "fsm.db"))
 
     DEFAULT_MARKUP_PERCENT: Decimal = _safe_decimal("DEFAULT_MARKUP_PERCENT", "30")
     DEFAULT_REFERRAL_PERCENT: Decimal = _safe_decimal("DEFAULT_REFERRAL_PERCENT", "5")
@@ -65,7 +72,7 @@ class Config:
 
     SUPPORT_USERNAME: str = os.getenv("SUPPORT_USERNAME", "")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOGS_PATH: str = os.getenv("LOGS_PATH", "data/logs")
+    LOGS_PATH: str = os.getenv("LOGS_PATH", os.path.join(DATA_DIR, "logs"))
 
 
 config = Config()

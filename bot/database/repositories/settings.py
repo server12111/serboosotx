@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Setting
@@ -37,7 +37,7 @@ class SettingsRepository:
     @staticmethod
     async def set(session: AsyncSession, key: str, value: str, updated_by: int | None = None) -> None:
         stmt = (
-            pg_insert(Setting)
+            sqlite_insert(Setting)
             .values(key=key, value=value, updated_by=updated_by)
             .on_conflict_do_update(
                 index_elements=[Setting.key], set_={"value": value, "updated_by": updated_by}
@@ -48,7 +48,7 @@ class SettingsRepository:
 
     @staticmethod
     async def set_if_absent(session: AsyncSession, key: str, value: str) -> None:
-        stmt = pg_insert(Setting).values(key=key, value=value).on_conflict_do_nothing(
+        stmt = sqlite_insert(Setting).values(key=key, value=value).on_conflict_do_nothing(
             index_elements=[Setting.key]
         )
         await session.execute(stmt)

@@ -1,9 +1,9 @@
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from aiogram import Bot, BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..database.models import RequiredChannel
@@ -20,9 +20,15 @@ _MEMBER_STATUSES = ("member", "administrator", "creator")
 
 
 class SubscriptionGateMiddleware(BaseMiddleware):
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], redis: Redis):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
-        self._redis = redis
+        self._ok_until: dict[int, float] = {}
+
+    def mark_ok(self, tg_id: int) -> None:
+        """Lets the "I've subscribed, check again" handler (subscription_gate.py)
+        populate the same positive-result cache this middleware reads, so a user who
+        just passed a fresh check isn't immediately re-gated on their very next tap."""
+        self._ok_until[tg_id] = time.monotonic() + OK_CACHE_TTL
 
     async def __call__(
         self,
@@ -39,8 +45,8 @@ class SubscriptionGateMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery) and event.data == "subgate:check":
             return await handler(event, data)
 
-        cache_key = f"subgate_ok:{tg_user.id}"
-        if await self._redis.get(cache_key):
+        cached_until = self._ok_until.get(tg_user.id)
+        if cached_until is not None and cached_until > time.monotonic():
             return await handler(event, data)
 
         async with self._session_factory() as session:
@@ -52,7 +58,7 @@ class SubscriptionGateMiddleware(BaseMiddleware):
         missing = await find_missing(bot, channels, tg_user.id)
 
         if not missing:
-            await self._redis.set(cache_key, "1", ex=OK_CACHE_TTL)
+            self._ok_until[tg_user.id] = time.monotonic() + OK_CACHE_TTL
             return await handler(event, data)
 
         text = pe("🔒 Чтобы пользоваться ботом, подпишитесь на каналы:")

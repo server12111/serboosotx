@@ -29,7 +29,7 @@ logger = logging.getLogger("boosty.admin.broadcast")
 
 router = Router(name="admin_broadcast")
 
-# FSM data is JSON-serialized by RedisStorage, so the draft is kept as a plain dict
+# FSM data is JSON-serialized by SQLiteStorage, so the draft is kept as a plain dict
 # (not a dataclass) — dataclass instances aren't JSON-serializable out of the box.
 _EMPTY_DRAFT = {"text": None, "media": [], "button_text": None, "button_url": None}
 

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import TypedDict
 
 from sqlalchemy import func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Service
@@ -24,9 +24,9 @@ class ServiceUpsert(TypedDict):
     dripfeed: bool
 
 
-# Postgres/asyncpg cap bind parameters at 32767 per statement. ServiceUpsert has 12
-# fields, so a single INSERT ... VALUES (...), (...) covering the whole catalog
-# (thousands of rows) blows past that — chunk into batches well under the limit.
+# SQLite caps bind parameters at 32766 per statement (SQLITE_MAX_VARIABLE_NUMBER).
+# ServiceUpsert has 12 fields, so a single INSERT ... VALUES (...), (...) covering the
+# whole catalog (thousands of rows) blows past that — chunk into batches well under it.
 _UPSERT_BATCH_SIZE = 1000
 
 
@@ -35,7 +35,7 @@ class ServiceRepository:
     async def upsert_many(session: AsyncSession, rows: list[ServiceUpsert]) -> None:
         for i in range(0, len(rows), _UPSERT_BATCH_SIZE):
             batch = rows[i : i + _UPSERT_BATCH_SIZE]
-            stmt = pg_insert(Service).values(batch)
+            stmt = sqlite_insert(Service).values(batch)
             stmt = stmt.on_conflict_do_update(
                 index_elements=[Service.external_service_id],
                 set_={
@@ -51,8 +51,8 @@ class ServiceRepository:
                     "cancel": stmt.excluded.cancel,
                     "dripfeed": stmt.excluded.dripfeed,
                     "is_active": True,
-                    "last_seen_at": func.now(),
-                    "updated_at": func.now(),
+                    "last_seen_at": datetime.datetime.now(datetime.timezone.utc),
+                    "updated_at": datetime.datetime.now(datetime.timezone.utc),
                 },
             )
             await session.execute(stmt)

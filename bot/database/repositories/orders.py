@@ -71,7 +71,7 @@ class OrderRepository:
                 status=status,
                 start_count=start_count,
                 remains=remains,
-                last_checked_at=func.now(),
+                last_checked_at=datetime.datetime.now(datetime.timezone.utc),
             )
         )
 

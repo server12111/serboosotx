@@ -1,7 +1,8 @@
+import datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import User
@@ -31,7 +32,7 @@ class UserRepository:
         from on_conflict_do_update's SET) — an existing user's referrer can never be
         overwritten by a later /start with a different referral link."""
         stmt = (
-            pg_insert(User)
+            sqlite_insert(User)
             .values(tg_id=tg_id, username=username, full_name=full_name, referrer_id=referrer_id)
             .on_conflict_do_update(
                 index_elements=[User.tg_id],
@@ -53,7 +54,9 @@ class UserRepository:
     @staticmethod
     async def touch_last_seen(session: AsyncSession, user_id: int) -> None:
         await session.execute(
-            update(User).where(User.id == user_id).values(last_seen_at=func.now())
+            update(User).where(User.id == user_id).values(
+                last_seen_at=datetime.datetime.now(datetime.timezone.utc)
+            )
         )
         await session.commit()
 

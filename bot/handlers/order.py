@@ -1,9 +1,9 @@
+import time
 from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..config import config
@@ -22,6 +22,14 @@ from ..utils.emoji import pe
 from ..utils.formatting import fmt_qty, fmt_rub
 
 router = Router(name="order")
+
+# In-process replacement for the old Redis SET-NX lock: the bot is a single process
+# (run.py's own file lock guarantees at most one instance runs), so a plain dict of
+# user_id -> lock-expiry timestamp gives the same double-tap protection with no
+# separate process to run.
+_order_lock_until: dict[int, float] = {}
+_ORDER_LOCK_SECONDS = 30  # comfortably exceeds IcheatbotClient's own HTTP timeout (20s,
+# see icheatbot.py) — place_order() can legitimately take that long inside this lock.
 
 
 @router.callback_query(F.data.startswith("service:order:"))
@@ -164,16 +172,13 @@ async def cb_order_confirm(
     user: User,
     session_factory: async_sessionmaker[AsyncSession],
     api_client: IcheatbotClient,
-    redis: Redis,
 ) -> None:
-    lock_key = f"order_lock:{user.id}"
-    # TTL must comfortably exceed IcheatbotClient's own HTTP timeout (20s, see
-    # icheatbot.py) — place_order() can legitimately take that long inside this lock,
-    # and if the lock expired first a duplicate confirm tap could slip through.
-    acquired = await redis.set(lock_key, "1", nx=True, ex=30)
-    if not acquired:
+    now = time.monotonic()
+    locked_until = _order_lock_until.get(user.id)
+    if locked_until is not None and locked_until > now:
         await callback.answer("⏳ Заказ уже обрабатывается…", show_alert=True)
         return
+    _order_lock_until[user.id] = now + _ORDER_LOCK_SECONDS
 
     await callback.message.edit_text(pe("⏳ Обработка…"))
     await callback.answer()
@@ -233,4 +238,4 @@ async def cb_order_confirm(
             text = "❌ Не удалось разместить заказ у поставщика. Средства возвращены на баланс."
             await callback.message.edit_text(pe(text), reply_markup=back_kb("menu:main"))
     finally:
-        await redis.delete(lock_key)
+        _order_lock_until.pop(user.id, None)

@@ -4,9 +4,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import ErrorEvent, Update
-from redis.asyncio import Redis
 
 from .config import config
 from .database.engine import async_session_factory
@@ -18,6 +16,7 @@ from .middlewares.throttling import ThrottlingMiddleware
 from .middlewares.user import UserMiddleware
 from .services import catalog_sync, invoice_reconciler, order_poller
 from .services.icheatbot import IcheatbotClient
+from .services.sqlite_fsm_storage import SQLiteStorage
 
 logger = logging.getLogger("boosty.main")
 
@@ -39,8 +38,8 @@ async def _seed_default_settings() -> None:
 async def main() -> None:
     await _seed_default_settings()
 
-    redis = Redis.from_url(config.REDIS_URL)
-    storage = RedisStorage(redis)
+    storage = SQLiteStorage(config.FSM_DB_PATH)
+    await storage.connect()
 
     bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher(storage=storage)
@@ -49,19 +48,25 @@ async def main() -> None:
 
     dp["session_factory"] = async_session_factory
     dp["api_client"] = api_client
-    dp["redis"] = redis
 
     user_router, admin_router = setup_routers()
     admin_router.message.middleware(AdminMiddleware(config.ADMIN_IDS))
     admin_router.callback_query.middleware(AdminMiddleware(config.ADMIN_IDS))
 
     # Subscription gate is scoped to user_router only — admins must always retain
-    # access to the admin panel regardless of their own channel memberships.
-    user_router.message.middleware(SubscriptionGateMiddleware(async_session_factory, redis))
-    user_router.callback_query.middleware(SubscriptionGateMiddleware(async_session_factory, redis))
+    # access to the admin panel regardless of their own channel memberships. The
+    # instance is also injected into dp so the "I've subscribed" handler can update
+    # the same positive-result cache the middleware reads.
+    subscription_gate = SubscriptionGateMiddleware(async_session_factory)
+    dp["subscription_gate"] = subscription_gate
+    user_router.message.middleware(subscription_gate)
+    user_router.callback_query.middleware(subscription_gate)
 
-    dp.message.middleware(ThrottlingMiddleware(redis))
-    dp.callback_query.middleware(ThrottlingMiddleware(redis))
+    # One shared instance — message and callback-query flows must throttle against
+    # the same per-user counters, not two independent ones.
+    throttling = ThrottlingMiddleware()
+    dp.message.middleware(throttling)
+    dp.callback_query.middleware(throttling)
     dp.message.middleware(UserMiddleware(async_session_factory))
     dp.callback_query.middleware(UserMiddleware(async_session_factory))
 
@@ -119,7 +124,7 @@ async def main() -> None:
             task.cancel()
         await asyncio.gather(*background_tasks, return_exceptions=True)
         await bot.session.close()
-        await redis.aclose()
+        await storage.close()
 
 
 if __name__ == "__main__":

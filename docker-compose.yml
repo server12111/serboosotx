@@ -4,44 +4,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://boosty:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/boosty
-      REDIS_URL: redis://redis:6379/0
-      LOGS_PATH: /app/data/logs
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      DATA_DIR: /app/data
     volumes:
       - ./data:/app/data
     command: sh -c "alembic upgrade head && python run.py"
-
-  postgres:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_DB: boosty
-      POSTGRES_USER: boosty
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U boosty"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    restart: always
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-volumes:
-  pgdata:
-  redisdata:

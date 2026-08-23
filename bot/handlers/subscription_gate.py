@@ -1,11 +1,10 @@
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
-from redis.asyncio import Redis
 
 from ..database.models import User
 from ..database.repositories.required_channels import RequiredChannelRepository
 from ..keyboards.inline import subscription_gate_kb
-from ..middlewares.subscription_gate import OK_CACHE_TTL, find_missing
+from ..middlewares.subscription_gate import SubscriptionGateMiddleware, find_missing
 from ..utils.emoji import pe
 from .start import WELCOME_TEXT, menu_kb
 
@@ -13,7 +12,13 @@ router = Router(name="subscription_gate")
 
 
 @router.callback_query(F.data == "subgate:check")
-async def cb_subgate_check(callback: CallbackQuery, user: User, session_factory, bot: Bot, redis: Redis) -> None:
+async def cb_subgate_check(
+    callback: CallbackQuery,
+    user: User,
+    session_factory,
+    bot: Bot,
+    subscription_gate: SubscriptionGateMiddleware,
+) -> None:
     async with session_factory() as session:
         channels = await RequiredChannelRepository.list_active(session)
 
@@ -24,6 +29,6 @@ async def cb_subgate_check(callback: CallbackQuery, user: User, session_factory,
         await callback.message.edit_reply_markup(reply_markup=subscription_gate_kb(missing))
         return
 
-    await redis.set(f"subgate_ok:{callback.from_user.id}", "1", ex=OK_CACHE_TTL)
+    subscription_gate.mark_ok(callback.from_user.id)
     await callback.message.edit_text(pe(WELCOME_TEXT), reply_markup=menu_kb(user), parse_mode="HTML")
     await callback.answer("✅ Подписка подтверждена!")
