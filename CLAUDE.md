@@ -12,8 +12,11 @@ TikTok, YouTube и ещё ~14 платформ) поверх API `icheatbot.com/
 ## Запуск
 
 - Локально (никаких внешних сервисов не нужно — только SQLite-файлы): `python run.py`
-- Docker: `docker compose up -d` (сам применяет миграции перед стартом)
-- Миграции вручную: `alembic upgrade head`
+- Docker: `docker compose up -d`
+- `run.py` сам применяет миграции (`alembic upgrade head`) при каждом старте, перед
+  запуском бота — не зависит от того, как именно его запускают (раньше это было
+  завязано только на команду в `docker-compose.yml`, и голый `python run.py` на
+  свежей БД падал с "no such table").
 
 ## Стек
 

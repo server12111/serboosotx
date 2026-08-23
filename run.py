@@ -8,8 +8,21 @@ from bot.config import config
 from bot.utils.logger import setup_logging
 
 LOCK_FILE = os.path.join(config.DATA_DIR, "boosty.lock")
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 logger = logging.getLogger("boosty.run")
+
+
+def _run_migrations() -> None:
+    """Applies pending Alembic migrations before the bot starts — makes run.py
+    self-sufficient regardless of how it's launched (previously this only happened
+    via docker-compose's `alembic upgrade head && python run.py` command wrapper, so
+    a bare `python run.py` on a fresh DB crashed with "no such table")."""
+    from alembic import command
+    from alembic.config import Config
+
+    alembic_cfg = Config(os.path.join(_PROJECT_ROOT, "alembic.ini"))
+    command.upgrade(alembic_cfg, "head")
 
 
 def _acquire_single_instance_lock():
@@ -39,6 +52,7 @@ def _acquire_single_instance_lock():
 def main() -> None:
     setup_logging(config.LOGS_PATH, config.LOG_LEVEL)
     _lock_handle = _acquire_single_instance_lock()  # noqa: F841 — keep the handle alive
+    _run_migrations()
 
     from bot.main import main as bot_main
 

@@ -7,4 +7,4 @@ services:
       DATA_DIR: /app/data
     volumes:
       - ./data:/app/data
-    command: sh -c "alembic upgrade head && python run.py"
+    # run.py applies pending migrations itself on startup — no wrapper command needed.
