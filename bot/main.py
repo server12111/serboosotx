@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import os
+import sys
+import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -17,8 +20,48 @@ from .middlewares.user import UserMiddleware
 from .services import catalog_sync, invoice_reconciler, order_poller
 from .services.icheatbot import IcheatbotClient
 from .services.sqlite_fsm_storage import SQLiteStorage
+from .utils.logger import setup_logging
 
 logger = logging.getLogger("boosty.main")
+
+LOCK_FILE = os.path.join(config.DATA_DIR, "boosty.lock")
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _run_migrations() -> None:
+    """Applies pending Alembic migrations before the bot starts — lives here (not just
+    in run.py) so the bot self-migrates regardless of which entrypoint actually gets
+    invoked (some hosts auto-detect and run `bot/main.py` directly instead of
+    `run.py`, which would otherwise skip migrations and crash with "no such table")."""
+    from alembic import command
+    from alembic.config import Config
+
+    alembic_cfg = Config(os.path.join(_PROJECT_ROOT, "alembic.ini"))
+    command.upgrade(alembic_cfg, "head")
+
+
+def _acquire_single_instance_lock():
+    os.makedirs(os.path.dirname(os.path.abspath(LOCK_FILE)), exist_ok=True)
+    if sys.platform == "win32":
+        import msvcrt
+
+        fh = open(LOCK_FILE, "w")
+        try:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            print("Бот уже запущен (lock-файл занят).")
+            sys.exit(1)
+        return fh
+    else:
+        import fcntl
+
+        fh = open(LOCK_FILE, "w")
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print("Бот уже запущен (lock-файл занят).")
+            sys.exit(1)
+        return fh
 
 
 async def _seed_default_settings() -> None:
@@ -35,7 +78,7 @@ async def _seed_default_settings() -> None:
         )
 
 
-async def main() -> None:
+async def _serve() -> None:
     await _seed_default_settings()
 
     storage = SQLiteStorage(config.FSM_DB_PATH)
@@ -127,5 +170,23 @@ async def main() -> None:
         await storage.close()
 
 
+def main() -> None:
+    setup_logging(config.LOGS_PATH, config.LOG_LEVEL)
+    _lock_handle = _acquire_single_instance_lock()  # noqa: F841 — keep the handle alive
+    _run_migrations()
+
+    backoff = 5
+    while True:
+        try:
+            asyncio.run(_serve())
+            break  # a clean exit (e.g. Ctrl+C) should not be restarted
+        except KeyboardInterrupt:
+            break
+        except Exception:
+            logger.exception("Bot crashed, restarting in %s seconds", backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
